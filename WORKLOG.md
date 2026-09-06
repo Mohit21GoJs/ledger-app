@@ -29,3 +29,5 @@ Reasoning lives in `AMBIGUITIES.md`, `REJECTED.md`, `NUMBERS.md` and `ARCHITECTU
 | 13:14 | | Acceptance — one test per criterion; the four rejected ones pinned to the behaviour that refutes them |
 | 13:17 | | Report — `bun run replay` prints per day and account: events with decisions, closing balance, fee, interest, capitalized final |
 | 13:20 | | Known-failing — the one deliberate failure: fee history depends on arrival order. Kept out of the green suite, annotated with why every fix is worse |
+| 13:34 | | `AMBIGUITIES.md` corrected against the code, with references: §4 ordering split by observability, §9 throw-vs-reject rules, §10 shallow freeze |
+| 13:34 | | Docs — `README`, `ARCHITECTURE` (mermaid), `NUMBERS` (every figure derived), `REJECTED` (the four refuted criteria) |
