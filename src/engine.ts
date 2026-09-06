@@ -10,9 +10,10 @@
  * of step with the log it is supposed to describe.
  */
 
-import { add, isNegative, subtract } from "dinero.js/bigint";
+import { add, isNegative, isPositive, subtract } from "dinero.js/bigint";
 
 import type {
+  Accrual,
   AuthorizationEvent,
   CreditEvent,
   Day,
@@ -23,7 +24,7 @@ import type {
   Posting,
   SettlementEvent,
 } from "./ledger";
-import { type LedgerCurrency, type Money, parseAmount, split, zero } from "./money";
+import { type LedgerCurrency, type Money, type Rate, accrue, parseAmount, split, zero } from "./money";
 
 export type RejectionReason = "INSUFFICIENT_AVAILABLE_BALANCE" | "NO_SUCH_AUTHORIZATION";
 
@@ -179,14 +180,31 @@ function decideSettlement(ledger: Ledger, event: SettlementEvent): LedgerRecord 
  */
 const OVERDRAFT_FEE: Readonly<Record<string, string>> = Object.freeze({ AED: "25.00" });
 
+/**
+ * 0.04% per day, as an exact scaled integer: 4 / 10^4.
+ *
+ * Held exactly rather than as 0.0004 so that rounding happens once, inside
+ * `accrue`, where it is chosen. See NUMBERS.md.
+ */
+const DAILY_INTEREST_RATE: Rate = Object.freeze({ amount: 4n, scale: 4n });
+
+/** The day accrued interest becomes a single credit. */
+const CAPITALIZE_ON: Day = 6;
+
 export type AccountClose = {
   readonly accountId: string;
   /** The balance the fee decision was made on. */
   readonly preFeeBalance: Money;
   /** The fee assessed, when one was. */
   readonly fee?: Money;
-  /** What the day actually closed at, fee included. */
+  /** What the day closed at, fee included. This is what interest accrued on. */
   readonly closingBalance: Money;
+  /** This day's accrual. Zero unless the closing balance was positive. */
+  readonly interest: Money;
+  /** On the capitalization day: the single credit, being the sum of the accruals. */
+  readonly capitalized?: Money;
+  /** The ledger balance once the day is finished, capitalization included. */
+  readonly finalBalance: Money;
 };
 
 export type DayClose = {
@@ -206,54 +224,107 @@ function feeFor(currency: LedgerCurrency, accountId: string, day: Day): Money {
   return parseAmount(currency, scheduled);
 }
 
+function assessOverdraftFee(ledger: Ledger, accountId: string, day: Day): Money {
+  const currency = ledger.currencyOf(accountId);
+  const fee = feeFor(currency, accountId, day);
+  const id = `FEE-${accountId}-D${day}`;
+
+  ledger.append({
+    event: { kind: "OVERDRAFT_FEE", id, accountId, bookedDay: day, valueDate: day, amount: fee },
+    decision: "APPLIED",
+    postings: [
+      { eventId: id, accountId, bookedDay: day, valueDate: day, amount: negated(currency, fee) },
+    ],
+  });
+  return fee;
+}
+
+/**
+ * A day's accrual: 0.04% of what that day closed at, positive balances only.
+ *
+ * `balanceAsOf(account, d, d)` is stable once day `d` is sealed -- nothing can
+ * be booked into a closed day -- so a past day's accrual is a fact that can be
+ * recomputed rather than a number that has to be stored and kept in step.
+ */
+function accrualOn(ledger: Ledger, accountId: string, day: Day): Money {
+  const currency = ledger.currencyOf(accountId);
+  const base = ledger.balanceAsOf(accountId, day, day);
+  return isPositive(base) ? accrue(base, DAILY_INTEREST_RATE) : zero(currency);
+}
+
+/**
+ * Capitalize the window's accruals as one credit.
+ *
+ * The credit IS the sum of the stored daily amounts, so "the rounded daily
+ * accruals must sum exactly to the capitalized total" holds by construction and
+ * no remainder can exist to discard. That is what makes acceptance criterion 8
+ * refusable rather than merely unimplemented.
+ *
+ * Called after this day's own accrual, so capitalization never compounds inside
+ * the window.
+ */
+function capitalizeInterest(ledger: Ledger, accountId: string, day: Day): Money | undefined {
+  const currency = ledger.currencyOf(accountId);
+  const accruals: Accrual[] = Array.from({ length: day }, (_, index) => ({
+    day: index + 1,
+    amount: accrualOn(ledger, accountId, index + 1),
+  }));
+
+  const total = accruals.reduce((sum, accrual) => add(sum, accrual.amount), zero(currency));
+  // An account that never held a positive balance has no credit to make, and a
+  // zero-amount event would be a record that states nothing.
+  if (!isPositive(total)) return undefined;
+
+  const id = `INT-${accountId}-D${day}`;
+  ledger.append({
+    event: {
+      kind: "INTEREST_CAPITALIZATION",
+      id,
+      accountId,
+      bookedDay: day,
+      valueDate: day,
+      amount: total,
+      accruals,
+    },
+    decision: "APPLIED",
+    postings: [{ eventId: id, accountId, bookedDay: day, valueDate: day, amount: total }],
+  });
+  return total;
+}
+
 /**
  * Close one day for every account, then seal it.
  *
- * The order matters and is argued in AMBIGUITIES section 4: the fee trigger
- * reads the PRE-fee balance, so a fee can never count toward its own condition;
- * the fee is then value-dated the day assessed, so it is part of what that day
- * closed at.
+ * The order matters and is argued in AMBIGUITIES section 4:
  *
- * Only what was known at this close is used. A day is sealed once and never
- * re-opened, so a later back-valued arrival restates the past without ever
- * rewriting a published figure.
+ *   1. read the pre-fee close, so a fee can never count toward its own trigger;
+ *   2. assess at most one fee, value-dated today, so it belongs to this close;
+ *   3. accrue on the post-fee close;
+ *   4. on the last day only, capitalize -- after step 3, so nothing compounds.
+ *
+ * Only what was known at this close is used, and the day is sealed afterwards.
+ * A later back-valued arrival therefore restates the past without any published
+ * figure ever being rewritten.
  */
 export function closeDay(ledger: Ledger, day: Day): DayClose {
-  const accounts = ledger.accountIds.map((accountId) => {
-    const currency = ledger.currencyOf(accountId);
+  const accounts = ledger.accountIds.map((accountId): AccountClose => {
     const preFeeBalance = ledger.balanceAsOf(accountId, day, day);
+    const fee = isNegative(preFeeBalance)
+      ? assessOverdraftFee(ledger, accountId, day)
+      : undefined;
 
-    if (!isNegative(preFeeBalance)) {
-      return { accountId, preFeeBalance, closingBalance: preFeeBalance };
-    }
-
-    const fee = feeFor(currency, accountId, day);
-    ledger.append({
-      event: {
-        kind: "OVERDRAFT_FEE",
-        id: `FEE-${accountId}-D${day}`,
-        accountId,
-        bookedDay: day,
-        valueDate: day,
-        amount: fee,
-      },
-      decision: "APPLIED",
-      postings: [
-        {
-          eventId: `FEE-${accountId}-D${day}`,
-          accountId,
-          bookedDay: day,
-          valueDate: day,
-          amount: negated(currency, fee),
-        },
-      ],
-    });
+    const closingBalance = ledger.balanceAsOf(accountId, day, day);
+    const interest = accrualOn(ledger, accountId, day);
+    const capitalized = day === CAPITALIZE_ON ? capitalizeInterest(ledger, accountId, day) : undefined;
 
     return {
       accountId,
       preFeeBalance,
-      fee,
-      closingBalance: ledger.balanceAsOf(accountId, day, day),
+      ...(fee === undefined ? {} : { fee }),
+      closingBalance,
+      interest,
+      ...(capitalized === undefined ? {} : { capitalized }),
+      finalBalance: ledger.balanceAsOf(accountId, day, day),
     };
   });
 

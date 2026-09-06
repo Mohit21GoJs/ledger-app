@@ -1,6 +1,8 @@
 /** Shared fixtures. The two accounts from the brief, and terse event builders. */
 
+import { closeDay } from "../src/engine";
 import { Ledger } from "../src/ledger";
+import type { DayClose } from "../src/engine";
 import type {
   AuthorizationEvent,
   CreditEvent,
@@ -95,3 +97,22 @@ export function settle(
 export function reverse(id: string, reverses: string, days: Days): ReversalEvent {
   return { kind: "REVERSAL", ...when(id, ACC_AED, days), reverses };
 }
+
+/** Close days up to and including `through`, resuming from wherever the ledger is. */
+export function closeThrough(ledger: Ledger, through: Day): DayClose[] {
+  const closes: DayClose[] = [];
+  for (let day = ledger.closedThrough + 1; day <= through; day += 1) {
+    closes.push(closeDay(ledger, day));
+  }
+  return closes;
+}
+
+/** The close of one account on one day. */
+export function closeOf(close: DayClose | undefined, accountId: string) {
+  const account = close?.accounts.find((candidate) => candidate.accountId === accountId);
+  if (!account) throw new Error(`no close for ${accountId} on day ${close?.day}`);
+  return account;
+}
+
+export const eventsOfKind = (ledger: Ledger, kind: string) =>
+  ledger.records.filter((record) => record.event.kind === kind);
