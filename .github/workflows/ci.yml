@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run typecheck
+
+      # The green suite only. known-failing/ is deliberately excluded: it is
+      # expected to fail (fee history is arrival-order dependent, by design), so
+      # gating on it would either keep the build permanently red or force
+      # inverting its exit code — which would hide a real regression behind it.
+      - run: bun run test
