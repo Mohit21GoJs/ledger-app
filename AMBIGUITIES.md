@@ -31,7 +31,7 @@ So "the Day 2 balance" is under-specified. It has at least two correct answers:
 
 The brief says "replayed in this order" and then lists E9 (Day 6) before E10 (Day 5). Either the ordering is a typo, or arrival order is genuinely independent of booking day.
 
-**Resolution.** Take the instruction literally. Events are ingested E1…E10 in exactly the order given, and each retains its position in the feed. The ledger never sorts the source stream. Day-level reporting groups by `bookedDay`, which is a *view* over the committed records, not a reordering of them.
+**Resolution.** Take the instruction literally. Events are ingested E1…E10 in exactly the order given, and each retains its position in the feed. The ledger never sorts the source stream. Day-level reporting groups by `bookedDay` ([main.ts:80](src/main.ts:80)), which is a *view* over the committed records, not a reordering of them.
 
 **Why not sort.** Re-sorting the stream into booking order would make replay a function of my interpretation rather than of the input. It would also quietly discard the fact that the feed handed them over out of order — a fact a real reconciliation would need to keep. E10 still lands on Day 5 because its `bookedDay` and `valueDate` both say 5; arriving late in the feed does not move it.
 
@@ -63,16 +63,19 @@ I considered and rejected every repair: back-dating the fee breaks the value-dat
 
 ## 4. What happens in what order at a day close
 
-The brief fixes the ingredients but not the sequence, and the sequence changes numbers.
+The brief fixes the ingredients of a close but not their sequence. Two ordering choices hide here, and they are not equal: one changes numbers, the other cannot.
 
-Two sub-questions:
+**(a) Does the fee count toward its own trigger? — observable, so it matters.** The trigger is evaluated on the **pre-fee** close ([`closeDay`, engine.ts:317](src/engine.ts:317)). Reading the post-fee balance instead would let the fee push the balance further negative and re-fire the trigger — a fee cascading into more fees. The source of the trigger balance genuinely changes the fee count, and pre-fee is the only non-circular choice.
 
-- **Does the fee count toward its own trigger?** If it did, the test would be circular. Resolution: the trigger is evaluated on the **pre-fee** close.
-- **Does the fee reduce the interest base?** The fee is value-dated the day it is assessed, so it is part of that day's closing balance by definition. Resolution: interest accrues on the **post-fee** close.
+**(b) Does the fee reduce the interest base? — unobservable in principle, not just on this stream.** Proof, from the rules as coded:
 
-So each account's close is: compute pre-fee close → assess at most one fee → compute post-fee close → accrue interest on it.
+- a fee is assessed only when the pre-fee balance is negative — [engine.ts:317](src/engine.ts:317);
+- the fee posts a negative amount, so `post-fee = pre-fee − fee < pre-fee < 0` — [engine.ts:242](src/engine.ts:242);
+- interest accrues only on a positive balance — [engine.ts:257](src/engine.ts:257).
 
-On this stream the distinction is invisible — Day 5 is negative before and after the fee, so it earns nothing either way. It is written down because it is invisible: an untested ordering choice is where a second reader's numbers start diverging from mine.
+So on any day a fee exists, both candidate bases are negative and interest is zero either way; on any day without a fee, pre-fee and post-fee are identical. **No stream can distinguish the two orderings.** We accrue on the **post-fee** close ([engine.ts:321-322](src/engine.ts:321)) because the fee is value-dated today and is therefore part of today's balance by definition — but nothing observable rides on the choice. It would become observable only if one of three assumptions changed: a credit-side (positive) fee, interest on negative balances, or a zero fee paired with a `>= 0` trigger. None hold here.
+
+So each account's close is: pre-fee close → assess at most one fee → post-fee close → accrue → (Day 6 only) capitalize.
 
 **Related: does interest compound inside the window?** No. Accruals capitalize as a single credit at end of Day 6, so they are not part of the ledger balance on Days 1–5 and cannot form part of a later day's base. Six simple accruals, no compounding.
 
@@ -137,6 +140,13 @@ Specifically, it does **not**:
 - recreate interest that was not earned on Day 5 — no positive balance existed at that close, so no accrual was missed, only foregone;
 - release any hold.
 
+**How a reversal can fail, and why the failures split two ways.** [`decideReversal`](src/engine.ts:350) draws a hard line between a *contradiction in the instruction* — an operator/feed bug the ledger must not paper over, raised as a throw — and a *legitimate business decline* — a recorded rejection with zero postings:
+
+- **throws** if the target belongs to a different account — [engine.ts:355](src/engine.ts:355). A cross-account reversal is a hole, not an outcome; the "must name the same account" rule above is enforced *as a throw*, not a decline.
+- **throws** if the reversal declares a value date its target does not have — [engine.ts:390](src/engine.ts:390). Silently trusting either date would hide a feed bug behind a posting that looks right.
+- **rejects** with `NO_SUCH_EVENT` when the target is missing or was itself rejected — [engine.ts:363](src/engine.ts:363). There is nothing to negate, and the attempt still earns a record.
+- **rejects** with `ALREADY_REVERSED` when a prior applied reversal already names the same target — [engine.ts:372](src/engine.ts:372). A reversal is not idempotent; a second one would double-credit.
+
 **Consequence, and it is the one the criteria get wrong.** The pre-E7 close on Day 4 was 465.00. After E9 the Day-6 close is 440.00, not 465.00 — the 25.00 fee stands. A design in which reversing an entry silently unwound every downstream consequence would be a design in which no published figure is ever final. Whether the fee *should* be waived is a customer-service decision, and it would arrive as its own credit event with its own authorization — not as a side effect of E9.
 
 ---
@@ -147,7 +157,7 @@ Specifically, it does **not**:
 
 **Resolution.** It reaches to the boundary. Concretely:
 
-- Input is snapshotted and deeply frozen on the way in, so a caller keeping a reference to the object it passed cannot reach back and edit committed history.
+- Input is snapshotted and frozen on the way in ([`snapshotOf`, ledger.ts:128](src/ledger.ts:128)), so a caller keeping a reference to the object it passed cannot reach back and edit committed history. The copy is **shallow** on purpose: an event's only nested values are dinero amounts, which are immutable by construction, and recursing into a library's own objects to freeze their internals is how you break it. The one array we hold — a capitalization's `accruals` — is frozen explicitly.
 - Validation completes **before** any sequence number, event id, or record is committed. A rejected append leaves the store byte-identical to before it, so a failed append is safely retryable and cannot burn an id.
 - An event and its postings must name the same account, and currency identity is code **and** scale — `{AED,2}` and `{AED,3}` are not the same currency and are never silently reconciled.
 - Face amounts are positive; direction comes from the event type. An event carrying a negative amount is a caller bug, not a clever debit.
