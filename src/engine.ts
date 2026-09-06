@@ -23,7 +23,7 @@ import type {
   Posting,
   SettlementEvent,
 } from "./ledger";
-import { type LedgerCurrency, type Money, split, zero } from "./money";
+import { type LedgerCurrency, type Money, parseAmount, split, zero } from "./money";
 
 export type RejectionReason = "INSUFFICIENT_AVAILABLE_BALANCE" | "NO_SUCH_AUTHORIZATION";
 
@@ -167,6 +167,98 @@ function decideSettlement(ledger: Ledger, event: SettlementEvent): LedgerRecord 
     decision: "APPLIED",
     postings: [postingFor(event, negated(ledger.currencyOf(event.accountId), event.amount))],
   });
+}
+
+/**
+ * The overdraft fee, keyed by CURRENCY CODE rather than by account.
+ *
+ * There is no BHD entry, deliberately. The brief names AED 25.00 and is silent
+ * on BHD; converting it would need an FX rate this ledger does not have and
+ * must not invent. An overdrawn BHD account therefore fails loudly instead of
+ * being charged a guess. See NUMBERS.md.
+ */
+const OVERDRAFT_FEE: Readonly<Record<string, string>> = Object.freeze({ AED: "25.00" });
+
+export type AccountClose = {
+  readonly accountId: string;
+  /** The balance the fee decision was made on. */
+  readonly preFeeBalance: Money;
+  /** The fee assessed, when one was. */
+  readonly fee?: Money;
+  /** What the day actually closed at, fee included. */
+  readonly closingBalance: Money;
+};
+
+export type DayClose = {
+  readonly day: Day;
+  readonly accounts: readonly AccountClose[];
+};
+
+function feeFor(currency: LedgerCurrency, accountId: string, day: Day): Money {
+  const scheduled = OVERDRAFT_FEE[currency.code];
+  if (scheduled === undefined) {
+    throw new Error(
+      `NO_FEE_SCHEDULE: account ${accountId} is overdrawn on day ${day} in ` +
+        `${currency.code}, and no overdraft fee is defined for that currency. ` +
+        `Converting the AED fee would need an FX rate this ledger does not have.`,
+    );
+  }
+  return parseAmount(currency, scheduled);
+}
+
+/**
+ * Close one day for every account, then seal it.
+ *
+ * The order matters and is argued in AMBIGUITIES section 4: the fee trigger
+ * reads the PRE-fee balance, so a fee can never count toward its own condition;
+ * the fee is then value-dated the day assessed, so it is part of what that day
+ * closed at.
+ *
+ * Only what was known at this close is used. A day is sealed once and never
+ * re-opened, so a later back-valued arrival restates the past without ever
+ * rewriting a published figure.
+ */
+export function closeDay(ledger: Ledger, day: Day): DayClose {
+  const accounts = ledger.accountIds.map((accountId) => {
+    const currency = ledger.currencyOf(accountId);
+    const preFeeBalance = ledger.balanceAsOf(accountId, day, day);
+
+    if (!isNegative(preFeeBalance)) {
+      return { accountId, preFeeBalance, closingBalance: preFeeBalance };
+    }
+
+    const fee = feeFor(currency, accountId, day);
+    ledger.append({
+      event: {
+        kind: "OVERDRAFT_FEE",
+        id: `FEE-${accountId}-D${day}`,
+        accountId,
+        bookedDay: day,
+        valueDate: day,
+        amount: fee,
+      },
+      decision: "APPLIED",
+      postings: [
+        {
+          eventId: `FEE-${accountId}-D${day}`,
+          accountId,
+          bookedDay: day,
+          valueDate: day,
+          amount: negated(currency, fee),
+        },
+      ],
+    });
+
+    return {
+      accountId,
+      preFeeBalance,
+      fee,
+      closingBalance: ledger.balanceAsOf(accountId, day, day),
+    };
+  });
+
+  ledger.sealDay(day);
+  return { day, accounts };
 }
 
 /** Decide one incoming event and commit the outcome. */

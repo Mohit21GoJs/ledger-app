@@ -22,3 +22,4 @@ Reasoning lives in `AMBIGUITIES.md`, `REJECTED.md`, `NUMBERS.md` and `ARCHITECTU
 | 12:35 | | `money` — amounts at their currency's own precision, single-step rounding, conserving split. Tests first |
 | 12:41 | | `ledger` — append-only bitemporal store. `balanceAsOf(account, valueDate, knownOn)`, both cutoffs required |
 | 12:47 | | `engine` — authorization, settlement, credit, debit. Holds derived from the record log, not stored |
+| 12:53 | | Day close and overdraft fee. Trigger reads the pre-fee balance; fee schedule keyed by currency, no BHD entry |

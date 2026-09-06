@@ -154,6 +154,11 @@ export class Ledger {
     return this.#records;
   }
 
+  /** Open accounts, in the order they were opened. */
+  get accountIds(): readonly string[] {
+    return [...this.#accounts.keys()];
+  }
+
   get closedThrough(): Day {
     return this.#closedThrough;
   }
@@ -270,10 +275,12 @@ export class Ledger {
   }
 
   /**
-   * Seal a day. Days close once and in ascending order, so that a fee decision
-   * published at a close can never be contradicted by a later arrival.
+   * Seal a day against further events. Days seal once and in ascending order,
+   * so a fee decision published at a close can never be contradicted by a later
+   * arrival. The engine's `closeDay` runs the business close and calls this
+   * last.
    */
-  closeDay(day: Day): void {
+  sealDay(day: Day): void {
     if (day !== this.#closedThrough + 1) {
       throw new Error(
         `days close in order: expected day ${this.#closedThrough + 1}, got day ${day}`,

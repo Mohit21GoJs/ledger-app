@@ -50,8 +50,18 @@ export function credit(
   };
 }
 
-export function debit(id: string, amount: string, days: Days): DebitEvent {
-  return { kind: "DEBIT", ...when(id, ACC_AED, days), amount: aed(amount) };
+export function debit(
+  id: string,
+  amount: string,
+  days: Days,
+  options: { accountId?: string } = {},
+): DebitEvent {
+  const accountId = options.accountId ?? ACC_AED;
+  return {
+    kind: "DEBIT",
+    ...when(id, accountId, days),
+    amount: accountId === ACC_BHD ? bhd(amount) : aed(amount),
+  };
 }
 
 export function authorize(

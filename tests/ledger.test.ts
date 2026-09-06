@@ -234,21 +234,21 @@ describe("day lifecycle", () => {
    */
   test("a closed day accepts no further events", () => {
     const ledger = ledgerWithAccount();
-    ledger.closeDay(1);
+    ledger.sealDay(1);
     expect(() => post(ledger, creditOf("LATE", "1.00", 1, 1), 1)).toThrow(/closed/i);
   });
 
   test("a later booked day is still open after an earlier one closes", () => {
     const ledger = ledgerWithAccount();
-    ledger.closeDay(1);
+    ledger.sealDay(1);
     expect(() => post(ledger, creditOf("E4", "400.00", 3, 3), 1)).not.toThrow();
   });
 
-  test("days close once, and in order", () => {
+  test("days seal once, and in order", () => {
     const ledger = ledgerWithAccount();
-    ledger.closeDay(1);
-    expect(() => ledger.closeDay(1)).toThrow(/order|closed/i);
-    expect(() => ledger.closeDay(3)).toThrow(/order/i);
-    expect(() => ledger.closeDay(2)).not.toThrow();
+    ledger.sealDay(1);
+    expect(() => ledger.sealDay(1)).toThrow(/order|closed/i);
+    expect(() => ledger.sealDay(3)).toThrow(/order/i);
+    expect(() => ledger.sealDay(2)).not.toThrow();
   });
 });
