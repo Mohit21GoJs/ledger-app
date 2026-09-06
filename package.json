@@ -1,0 +1,21 @@
+{
+  "name": "ledger-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "In-memory, append-only, bitemporal account ledger core. No web layer, no persistence, no UI, no database.",
+  "scripts": {
+    "test": "bun test tests",
+    "test:known-failing": "bun test known-failing",
+    "test:all": "bun test tests known-failing",
+    "replay": "bun run src/main.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dinero.js": "2.0.2"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5"
+  }
+}
