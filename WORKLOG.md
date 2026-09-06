@@ -31,3 +31,4 @@ Reasoning lives in `AMBIGUITIES.md`, `REJECTED.md`, `NUMBERS.md` and `ARCHITECTU
 | 13:20 | | Known-failing — the one deliberate failure: fee history depends on arrival order. Kept out of the green suite, annotated with why every fix is worse |
 | 13:34 | | `AMBIGUITIES.md` corrected against the code, with references: §4 ordering split by observability, §9 throw-vs-reject rules, §10 shallow freeze |
 | 13:34 | | Docs — `README`, `ARCHITECTURE` (mermaid), `NUMBERS` (every figure derived), `REJECTED` (the four refuted criteria) |
+| 13:41 | | CI — typecheck + green suite on push and PR. `known-failing/` deliberately excluded, with the reason inline |
