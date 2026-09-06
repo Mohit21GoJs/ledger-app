@@ -20,3 +20,4 @@ Reasoning lives in `AMBIGUITIES.md`, `REJECTED.md`, `NUMBERS.md` and `ARCHITECTU
 | 12:21 | | Scaffolded Bun + TypeScript, strict. One runtime dependency: `dinero.js` via its bigint entry point |
 | 12:26 | | `AMBIGUITIES.md` — eleven ambiguities, written up before any code |
 | 12:35 | | `money` — amounts at their currency's own precision, single-step rounding, conserving split. Tests first |
+| 12:41 | | `ledger` — append-only bitemporal store. `balanceAsOf(account, valueDate, knownOn)`, both cutoffs required |

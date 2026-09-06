@@ -42,6 +42,11 @@ export type Money = Dinero<bigint, string>;
  */
 export type Rate = { readonly amount: bigint; readonly scale: bigint };
 
+/** The empty sum, in a given currency. An account with no postings is here. */
+export function zero(currency: LedgerCurrency): Money {
+  return dinero({ amount: 0n, currency });
+}
+
 /** No thousands separators, no exponent notation: an amount is digits and at most one point. */
 const DECIMAL_AMOUNT = /^-?\d+(?:\.\d+)?$/;
 
