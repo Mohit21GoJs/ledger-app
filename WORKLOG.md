@@ -27,3 +27,4 @@ Reasoning lives in `AMBIGUITIES.md`, `REJECTED.md`, `NUMBERS.md` and `ARCHITECTU
 | 13:03 | | Reversal — negates its target's postings at the target's value date, and undoes nothing else |
 | 13:12 | | Replay — E1…E10 in the literal feed order, then Days 1–6 closed in order. Six-day golden test over the real stream |
 | 13:14 | | Acceptance — one test per criterion; the four rejected ones pinned to the behaviour that refutes them |
+| 13:17 | | Report — `bun run replay` prints per day and account: events with decisions, closing balance, fee, interest, capitalized final |
