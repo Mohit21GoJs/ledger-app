@@ -25,3 +25,5 @@ Reasoning lives in `AMBIGUITIES.md`, `REJECTED.md`, `NUMBERS.md` and `ARCHITECTU
 | 12:53 | | Day close and overdraft fee. Trigger reads the pre-fee balance; fee schedule keyed by currency, no BHD entry |
 | 12:58 | | Interest — 0.04%/day on positive closes, capitalized on Day 6 as the sum of the stored accruals |
 | 13:03 | | Reversal — negates its target's postings at the target's value date, and undoes nothing else |
+| 13:12 | | Replay — E1…E10 in the literal feed order, then Days 1–6 closed in order. Six-day golden test over the real stream |
+| 13:14 | | Acceptance — one test per criterion; the four rejected ones pinned to the behaviour that refutes them |
